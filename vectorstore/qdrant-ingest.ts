@@ -11,18 +11,31 @@ const COLLECTION = "lpm_partners_demo";
 // but the test IIFE will use its own instance for clarity.
 let qdrant: QdrantClient | null = null; 
 
-async function ensureCleanCollection(client: QdrantClient) { 
+async function ensureNamedCollection(client: QdrantClient, expectedSize: number) {
+  // Получить схему коллекции
+  let info;
   try {
-    console.log('Deleting existing collection (if any) for a clean dummy point test...');
-    await client.deleteCollection(COLLECTION);
-    console.log('Collection deleted for dummy test.');
-  } catch (e:any) {
-    console.warn("Collection might not exist or another error during deletion for dummy test, proceeding to create.");
+    info = await client.getCollection(COLLECTION);
+    console.log('Текущая схема коллекции:', JSON.stringify(info.vectors));
+  } catch (e) {
+    console.warn('Коллекция не найдена, будет создана заново.');
+    info = null;
   }
-  await client.createCollection(COLLECTION, {
-    vectors: { text: { size: 1024, distance: "Cosine" } } 
-  });
-  console.log('Коллекция создана/очищена для теста dummy точки.');
+  // Проверяем, что коллекция named и размерность совпадает
+  const isNamed = info && info.vectors && info.vectors.text && typeof info.vectors.text.size === 'number';
+  const correctSize = isNamed && info.vectors.text.size === expectedSize;
+  if (!isNamed || !correctSize) {
+    if (info) {
+      console.log('Удаляю коллекцию, т.к. она не named или размерность не совпадает.');
+      await client.deleteCollection(COLLECTION);
+    }
+    await client.createCollection(COLLECTION, {
+      vectors: { text: { size: expectedSize, distance: 'Cosine' } }
+    });
+    console.log('Коллекция создана с именованным вектором text и размерностью', expectedSize);
+  } else {
+    console.log('Коллекция уже корректная (named, размерность совпадает).');
+  }
 }
 
 async function upsertSingleDummyPointForTest(client: QdrantClient) { 
@@ -61,9 +74,10 @@ if (!process.env.INGEST_REAL) {
   (async () => {
     console.log("--- Starting DUMMY POINT Upsert Test (Upsert ONLY) --- ");
     const testClient = new QdrantClient({ url: QDRANT_URL });
-    await ensureCleanCollection(testClient);
+    const dummyEmbedding = new Array(1024).fill(0.1);
+    await ensureNamedCollection(testClient, dummyEmbedding.length);
+    console.log('DEBUG: embedding length for dummy:', dummyEmbedding.length);
     const success = await upsertSingleDummyPointForTest(testClient);
-
     if (success) {
       console.log("Dummy point upsert reported success by the function. Manual check in Qdrant needed or use separate query script.");
     } else {
@@ -94,19 +108,26 @@ if (!process.env.INGEST_REAL) {
 if (require.main === module && process.env.INGEST_REAL === '1') {
   (async () => {
     const qdrant = new QdrantClient({ url: QDRANT_URL });
-    await ensureCleanCollection(qdrant);
+    // Получаем первую embedding для определения размерности
     const companies = await aggregateByCompany();
-    let count = 0;
     let firstEmbeddingLength: number | null = null;
     for (const [company, rows] of Object.entries(companies)) {
       if (!company || company === 'Unknown') continue;
       const chunkContent = buildCompanyChunk(company, rows);
       if (!chunkContent.trim()) continue;
       const embedding = await getEmbedding(chunkContent);
-      if (firstEmbeddingLength === null) {
-        firstEmbeddingLength = embedding.length;
-        console.log(`DEBUG: embedding length for first chunk: ${firstEmbeddingLength}`);
-      }
+      firstEmbeddingLength = embedding.length;
+      break;
+    }
+    if (!firstEmbeddingLength) throw new Error('Не удалось определить размерность embedding!');
+    await ensureNamedCollection(qdrant, firstEmbeddingLength);
+    let count = 0;
+    for (const [company, rows] of Object.entries(companies)) {
+      if (!company || company === 'Unknown') continue;
+      const chunkContent = buildCompanyChunk(company, rows);
+      if (!chunkContent.trim()) continue;
+      const embedding = await getEmbedding(chunkContent);
+      console.log(`DEBUG: embedding length for ${company}:`, embedding.length);
       const point = {
         id: `company_${company.replace(/[^a-zA-Z0-9_]/g, '_')}`,
         vector: { text: embedding },
