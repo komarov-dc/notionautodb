@@ -5,7 +5,7 @@ const ollama = new Ollama({ host: 'http://localhost:11434' });
 export async function doubleFilter(userQuery: string): Promise<boolean> {
   // Первый фильтр
   const quick = await ollama.chat({
-    model: 'gemma3:12b',
+    model: 'gemma3:27b',
     messages: [
       { role: 'system', content: QUICK_FILTER_PROMPT },
       { role: 'user', content: userQuery }
@@ -15,7 +15,7 @@ export async function doubleFilter(userQuery: string): Promise<boolean> {
   if (quickAnswer === 'no') return false;
   // Второй фильтр
   const deep = await ollama.chat({
-    model: 'gemma3:12b',
+    model: 'gemma3:27b',
     messages: [
       { role: 'system', content: DEEP_FILTER_PROMPT },
       { role: 'user', content: userQuery }

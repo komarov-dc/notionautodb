@@ -14,7 +14,7 @@ export async function improveUserQuery(userQuery: string): Promise<string> {
       { role: 'system', content: systemPrompt },
       { role: 'user', content: userQuery }
     ]
-  });Зна
+  });
   return message.content.trim();
 }
 
